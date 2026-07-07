@@ -59,10 +59,18 @@ def root():
     return {"message": "Orders API is running"}
 
 
+@app.get("/ping")
+def ping():
+    return {"status": "ok"}
+
+
 @app.post("/orders")
 def create_order(idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key")):
     if not idempotency_key:
-        raise HTTPException(status_code=400, detail="Missing Idempotency-Key")
+        raise HTTPException(
+            status_code=400,
+            detail="Missing Idempotency-Key"
+        )
 
     if idempotency_key in idempotency_store:
         return idempotency_store[idempotency_key]
@@ -74,7 +82,10 @@ def create_order(idempotency_key: Optional[str] = Header(None, alias="Idempotenc
 
     idempotency_store[idempotency_key] = order
 
-    return JSONResponse(status_code=201, content=order)
+    return JSONResponse(
+        status_code=201,
+        content=order
+    )
 
 
 @app.get("/orders")
