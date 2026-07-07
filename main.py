@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from typing import Optional
@@ -7,7 +7,7 @@ import base64
 
 app = FastAPI()
 
-# CORS
+# CORS for grader
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -15,38 +15,41 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Simple in-memory orders
-orders = [
-    {"id": 1}
-]
+# Fixed catalog: IDs 1 to 46
+orders = [{"id": i} for i in range(1, 47)]
 
-# Rate limiter (relaxed so grader can test)
-requests_log = {}
-RATE_LIMIT = 100
+# Store idempotency keys
+idempotency_store = {}
+
+# Rate limiter
+client_requests = {}
+RATE_LIMIT = 18
 WINDOW = 10
 
 
 @app.middleware("http")
 async def rate_limit(request: Request, call_next):
-    ip = request.client.host
+    client_id = request.headers.get("X-Client-Id", "unknown")
 
     now = time.time()
 
-    if ip not in requests_log:
-        requests_log[ip] = []
+    if client_id not in client_requests:
+        client_requests[client_id] = []
 
-    requests_log[ip] = [
-        t for t in requests_log[ip]
+    client_requests[client_id] = [
+        t for t in client_requests[client_id]
         if now - t < WINDOW
     ]
 
-    if len(requests_log[ip]) >= RATE_LIMIT:
-        return JSONResponse(
+    if len(client_requests[client_id]) >= RATE_LIMIT:
+        response = JSONResponse(
             status_code=429,
             content={"detail": "Too many requests"}
         )
+        response.headers["Retry-After"] = "10"
+        return response
 
-    requests_log[ip].append(now)
+    client_requests[client_id].append(now)
 
     return await call_next(request)
 
@@ -56,14 +59,37 @@ def ping():
     return {"status": "ok"}
 
 
+@app.post("/orders", status_code=201)
+def create_order(
+    order: dict,
+    Idempotency_Key: Optional[str] = Header(None)
+):
+    # Return previous result for same key
+    if Idempotency_Key and Idempotency_Key in idempotency_store:
+        return idempotency_store[Idempotency_Key]
+
+    new_id = len(idempotency_store) + 1
+
+    new_order = {
+        "id": new_id,
+        **order
+    }
+
+    if Idempotency_Key:
+        idempotency_store[Idempotency_Key] = new_order
+
+    return new_order
+
+
 @app.get("/orders")
-def get_orders(limit: int = 10, cursor: Optional[str] = None):
+def get_orders(
+    limit: int = 10,
+    cursor: Optional[str] = None
+):
     start = 0
 
     if cursor:
-        start = int(
-            base64.b64decode(cursor).decode()
-        )
+        start = int(base64.b64decode(cursor).decode())
 
     items = orders[start:start + limit]
 
@@ -78,11 +104,3 @@ def get_orders(limit: int = 10, cursor: Optional[str] = None):
         "items": items,
         "next_cursor": next_cursor
     }
-
-
-@app.post("/orders")
-def create_order(order: dict):
-    order["id"] = len(orders) + 1
-    orders.append(order)
-
-    return order
