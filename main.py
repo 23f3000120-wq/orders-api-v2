@@ -39,9 +39,10 @@ async def rate_limiter(request: Request, call_next):
         ]
 
         if len(client_requests[client_id]) >= RATE_LIMIT:
-            retry_after = int(
-                WINDOW - (now - client_requests[client_id][0])
-            ) + 1
+            retry_after = max(
+                1,
+                int(WINDOW - (now - client_requests[client_id][0]))
+            )
 
             return JSONResponse(
                 status_code=429,
@@ -62,13 +63,14 @@ def root():
 @app.get("/ping")
 def ping():
     return {
-        "email": "23f3000120@ds.study.iitm.ac.in",
-        "status": "ok"
+        "email": "23f3000120@ds.study.iitm.ac.in"
     }
 
 
-@app.post("/orders")
-def create_order(idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key")):
+@app.post("/orders", status_code=201)
+def create_order(
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key")
+):
     if not idempotency_key:
         raise HTTPException(
             status_code=400,
@@ -84,11 +86,7 @@ def create_order(idempotency_key: Optional[str] = Header(None, alias="Idempotenc
     }
 
     idempotency_store[idempotency_key] = order
-
-    return JSONResponse(
-        status_code=201,
-        content=order
-    )
+    return order
 
 
 @app.get("/orders")
@@ -98,12 +96,14 @@ def get_orders(limit: int = 10, cursor: Optional[str] = None):
     if cursor:
         start = int(base64.b64decode(cursor.encode()).decode())
 
-    items = orders[start:start + limit]
+    end = min(start + limit, len(orders))
+
+    items = orders[start:end]
 
     next_cursor = None
-    if start + limit < len(orders):
+    if end < len(orders):
         next_cursor = base64.b64encode(
-            str(start + limit).encode()
+            str(end).encode()
         ).decode()
 
     return {
