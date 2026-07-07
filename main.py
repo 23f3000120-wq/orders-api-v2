@@ -61,7 +61,10 @@ def root():
 
 @app.get("/ping")
 def ping():
-    return {"status": "ok"}
+    return {
+        "email": "23f3000120@ds.study.iitm.ac.in",
+        "status": "ok"
+    }
 
 
 @app.post("/orders")
